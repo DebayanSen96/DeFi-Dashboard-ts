@@ -81,30 +81,39 @@ app.get('/tokens', async (req: Request, res: Response) => {
           // Dynamic token fetch: ignore static tokens config
           const tokenAddresses: string[] = [];
           
-          // Get native token balance
-          const nativeBalance = await tokenService.getNativeBalance(chainKey, walletAddress);
-          
-          // Get token balances
-          const tokenBalances = await tokenService.getTokenBalances(chainKey, walletAddress);
+          // Get all token balances (native and ERC20)
+          const allTokenBalances = await tokenService.getTokenBalances(chainKey, walletAddress);
           
           // Format response
-          const tokenResponses: TokenResponse[] = Object.entries(tokenBalances).map(([address, data]) => ({
-            address,
-            balance: data.balance,
-            symbol: data.info?.symbol || 'UNKNOWN',
-            name: data.info?.tokenName || 'Unknown Token',
-            decimals: data.info?.decimals || '18',
-            type: data.info?.tokenType || 'ERC20',
-          }));
-          
-          // Add native token
-          tokenResponses.unshift({
-            address: ethers.ZeroAddress,
-            balance: nativeBalance,
-            symbol: 'ETH', // Default to ETH, adjust based on chain if needed
-            name: 'Ethereum',
-            decimals: '18',
-            type: 'NATIVE',
+          const tokenResponses: TokenResponse[] = Object.entries(allTokenBalances).map(([address, data]) => {
+            const isNative = address.toLowerCase() === ethers.ZeroAddress.toLowerCase();
+            const chainConfig = chains[chainKey as keyof typeof chains];
+            
+            let symbol = data.info?.symbol || 'UNKNOWN';
+            let name = data.info?.tokenName || 'Unknown Token';
+            let decimals = data.info?.decimals || '18';
+            let type = data.info?.tokenType || 'ERC20';
+
+            if (isNative && chainConfig) {
+              symbol = chainConfig.nativeCurrency.symbol;
+              name = chainConfig.nativeCurrency.name;
+              decimals = chainConfig.nativeCurrency.decimals.toString();
+              type = 'NATIVE';
+            } else if (isNative) { // Fallback if chainConfig somehow not found, though unlikely
+                symbol = data.info?.symbol || chain?.nativeCurrency?.symbol || 'NATIVE';
+                name = data.info?.tokenName || chain?.nativeCurrency?.name || 'Native Token';
+                decimals = data.info?.decimals || chain?.nativeCurrency?.decimals?.toString() || '18';
+                type = 'NATIVE';
+            }
+
+            return {
+              address,
+              balance: data.balance,
+              symbol,
+              name,
+              decimals,
+              type,
+            };
           });
           
           // Calculate total value (simplified - would need price data for real values)

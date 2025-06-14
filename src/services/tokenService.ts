@@ -168,7 +168,29 @@ class TokenService {
   }
 
   public async getTokenBalances(chain: string, walletAddress: string): Promise<Record<string, TokenData>> {
-    const result: Record<string, TokenData> = {};
+    const allBalances: Record<string, TokenData> = {};
+
+    // Fetch and add native token balance first
+    try {
+      const nativeTokenData = await this.getNativeBalance(chain, walletAddress);
+      allBalances[ZeroAddress] = nativeTokenData; // Use ZeroAddress as key for native token
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`Error fetching native balance for ${chain}:`, errorMessage);
+      // If native balance fetch fails, initialize with zero balance to allow other tokens to load
+      const chainConfig = chains[chain as keyof typeof chains];
+      allBalances[ZeroAddress] = {
+        balance: '0',
+        info: chainConfig ? {
+          contractAddress: ZeroAddress,
+          tokenName: chainConfig.nativeCurrency.name,
+          symbol: chainConfig.nativeCurrency.symbol,
+          decimals: chainConfig.nativeCurrency.decimals.toString(),
+          tokenType: 'NATIVE'
+        } : null
+      };
+    }
+
     const chainLower = chain.toLowerCase();
     let discoveredTokens: { address: string; symbol: string; decimals: number }[] = [];
 
@@ -210,22 +232,11 @@ class TokenService {
         }
       }
       
-      // Always fetch native token balance first
-      try {
-        const nativeBalance = await this.getNativeBalance(chain, walletAddress);
-        result['native'] = nativeBalance;
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Error fetching native balance for ${chain}:`, errorMessage);
-      }
-      
-      
-      
       // Process discovered tokens in batches
       const BATCH_SIZE = 10;
       for (let i = 0; i < discoveredTokens.length; i += BATCH_SIZE) {
         const batch = discoveredTokens.slice(i, i + BATCH_SIZE);
-        const batchPromises = batch.map(async (token) => {
+        const promises = batch.map(async (token) => {
           try {
             const balance = await this.getTokenBalance(chain, walletAddress, token.address);
             // Token info (name, symbol, decimals) is already partially available from tokentx
@@ -250,12 +261,16 @@ class TokenService {
           }
         });
 
-        const batchResults = await Promise.all(batchPromises);
-        
-        // Merge batch results
-        batchResults.forEach(({ tokenAddress, data }) => {
-          result[tokenAddress] = data;
-        });
+        const batchResults = await Promise.all(promises);
+
+        batchResults.forEach(item => {
+          if (item && item.tokenAddress && item.data) {
+            // Ensure we don't overwrite the native token entry if it somehow comes from discovery
+            if (item.tokenAddress.toLowerCase() !== ZeroAddress.toLowerCase()) {
+              allBalances[item.tokenAddress] = item.data;
+            }
+          }
+        }); 
 
         // Add a small delay between batches
         if (i + BATCH_SIZE < discoveredTokens.length) {
@@ -263,7 +278,7 @@ class TokenService {
         }
       }
 
-      return result;
+      return allBalances;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error(`Error fetching token balances for ${chain}:`, errorMessage);
