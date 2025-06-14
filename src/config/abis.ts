@@ -31,4 +31,16 @@ export const abis = {
     'function balanceOf(address account) external view returns (uint256)',
     'function locked(address account) external view returns (int128 amount, uint256 end)',
   ],
+  compoundComptroller: [
+    'function getAllMarkets() external view returns (address[] memory)',
+    'function markets(address cToken) external view returns (bool isListed, uint256 collateralFactorMantissa, bool isComped)',
+  ],
+  cToken: [
+    'function balanceOf(address owner) external view returns (uint256)',
+    'function borrowBalanceStored(address account) external view returns (uint256)',
+    'function exchangeRateStored() external view returns (uint256)',
+    'function underlying() external view returns (address)',
+    'function symbol() external view returns (string memory)',
+    'function decimals() external view returns (uint8)',
+  ],
 } as const;

@@ -6,6 +6,7 @@ import cors from 'cors';
 import { tokenService, TokenData } from './services/tokenService';
 import { PriceService, PriceTokenInput, PortfolioValuation } from './services/priceService';
 import { AaveService } from './services/aaveService';
+import { CompoundService } from './services/compoundService';
 import { LidoService } from './services/lidoService';
 import { YearnService } from './services/yearnService';
 import { chains } from './config/chains';
@@ -190,7 +191,7 @@ app.get('/positions', async (req: Request, res: Response) => {
     }
     
     // Determine which protocols to query
-    const allProtocols = ['aave', 'lido', 'yearn'] as const;
+    const allProtocols = ['aave', 'lido', 'yearn', 'compound'] as const;
     let targetProtocols = [...allProtocols];
     
     if (protocolsParam && typeof protocolsParam === 'string') {
@@ -225,6 +226,14 @@ app.get('/positions', async (req: Request, res: Response) => {
           case 'lido': {
             const lido = new LidoService(provider, walletAddress);
             positions.lido = await lido.getPositions();
+            break;
+          }
+          case 'yearn': {
+          break;
+          }
+          case 'compound': {
+            const compound = new CompoundService(provider, walletAddress);
+            positions.compound = await compound.getPositions();
             break;
           }
           case 'yearn': {

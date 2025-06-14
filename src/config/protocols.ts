@@ -28,6 +28,11 @@ export const protocols: ProtocolConfig = {
       },
     },
   },
+  compound: {
+    ethereum: {
+      comptroller: '0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B',
+    },
+  },
   pendle: {
     ethereum: {
       pendleToken: '0x808507121b80c02388fad14726482e061b8da827',
