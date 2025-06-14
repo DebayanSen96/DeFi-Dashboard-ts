@@ -47,7 +47,7 @@ export class LidoService {
     const stEthShares = await stEthContract.sharesOf(this.walletAddress);
     const stEthBalance = await stEthContract.getPooledEthByShares(stEthShares);
     
-    if (stEthShares.gt(0)) {
+    if (stEthShares > 0n) {
       positions.push({
         asset: config.stETH,
         symbol: stEthSymbol,
@@ -68,7 +68,7 @@ export class LidoService {
     const wstEthDecimals = await wstEthContract.decimals();
     const wstEthBalance = await wstEthContract.balanceOf(this.walletAddress);
 
-    if (wstEthBalance.gt(0)) {
+    if (wstEthBalance > 0n) {
       // For wstETH, we'll just show the wrapped amount
       // In a real implementation, you might want to convert wstETH to stETH and then to ETH
       positions.push({
