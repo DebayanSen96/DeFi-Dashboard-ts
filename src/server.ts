@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config(); // Load environment variables first
+
 import express, { Request, Response, NextFunction, Application } from 'express';
 import cors from 'cors';
 import { tokenService, TokenData } from './services/tokenService';
@@ -75,18 +78,14 @@ app.get('/tokens', async (req: Request, res: Response) => {
       targetChains.map(async (chainKey) => {
         try {
           const chain = chains[chainKey as keyof typeof chains];
-          const chainTokens = tokens[chainKey as keyof typeof tokens] || {};
-          const tokenAddresses = Object.values(chainTokens) as string[];
+          // Dynamic token fetch: ignore static tokens config
+          const tokenAddresses: string[] = [];
           
           // Get native token balance
           const nativeBalance = await tokenService.getNativeBalance(chainKey, walletAddress);
           
           // Get token balances
-          const tokenBalances = await tokenService.getTokenBalances(
-            chainKey,
-            walletAddress,
-            tokenAddresses
-          );
+          const tokenBalances = await tokenService.getTokenBalances(chainKey, walletAddress);
           
           // Format response
           const tokenResponses: TokenResponse[] = Object.entries(tokenBalances).map(([address, data]) => ({

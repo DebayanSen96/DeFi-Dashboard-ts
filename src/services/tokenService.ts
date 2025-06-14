@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ethers } from 'ethers';
+import { JsonRpcProvider, id, ZeroAddress } from 'ethers';
 import { protocols } from '../config/protocols';
 import { chains } from '../config/chains';
 import { abis } from '../config/abis';
@@ -31,10 +31,17 @@ interface TokenData {
 
 class TokenService {
   private static instance: TokenService;
+  private readonly etherscanApiKey?: string;
+  private readonly basescanApiKey?: string;
   private cache: Map<string, { data: any; expiry: number }> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  private constructor() {}
+  constructor() {
+    console.log('[TokenService Constructor] ETHERSCAN_API_KEY:', process.env.ETHERSCAN_API_KEY);
+    console.log('[TokenService Constructor] BASESCAN_API_KEY:', process.env.BASESCAN_API_KEY);
+    this.etherscanApiKey = process.env.ETHERSCAN_API_KEY;
+    this.basescanApiKey = process.env.BASESCAN_API_KEY;
+  }
 
   public static getInstance(): TokenService {
     if (!TokenService.instance) {
@@ -160,50 +167,86 @@ class TokenService {
     });
   }
 
-  public async getTokenBalances(chain: string, walletAddress: string, tokenAddresses: string[] = []): Promise<Record<string, TokenData>> {
+  public async getTokenBalances(chain: string, walletAddress: string): Promise<Record<string, TokenData>> {
     const result: Record<string, TokenData> = {};
-    
+    const chainLower = chain.toLowerCase();
+    let discoveredTokens: { address: string; symbol: string; decimals: number }[] = [];
+
     try {
       const config = this.getApiConfig(chain);
+      
+      // Discover tokens using block explorer API ('tokentx')
+      if (config.baseUrl && config.apiKey) {
+        try {
+          const txResponse = await axios.get<any>(config.baseUrl, {
+            params: {
+              module: 'account',
+              action: 'tokentx',
+              address: walletAddress,
+              startblock: 0,
+              endblock: 99999999,
+              sort: 'asc',
+              apikey: config.apiKey,
+            },
+            timeout: 10000,
+          });
+          if (txResponse.data.status === '1' && Array.isArray(txResponse.data.result)) {
+            const uniqueTokenMap = new Map<string, { address: string; symbol: string; decimals: number }>();
+            for (const tx of txResponse.data.result) {
+              const tokenAddress = tx.contractAddress.toLowerCase();
+              if (tokenAddress && tokenAddress !== ZeroAddress.toLowerCase() && !uniqueTokenMap.has(tokenAddress)) {
+                uniqueTokenMap.set(tokenAddress, {
+                  address: tokenAddress,
+                  symbol: tx.tokenSymbol,
+                  decimals: parseInt(tx.tokenDecimal, 10),
+                });
+              }
+            }
+            discoveredTokens = Array.from(uniqueTokenMap.values()).filter(token => token.address.toLowerCase() !== ZeroAddress.toLowerCase());
+          }
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Unknown error';
+          console.warn(`Error fetching token list for ${chain}: ${errMsg}`);
+        }
+      }
       
       // Always fetch native token balance first
       try {
         const nativeBalance = await this.getNativeBalance(chain, walletAddress);
-        result['native'] = {
-          balance: nativeBalance,
-          info: {
-            contractAddress: '0x0000000000000000000000000000000000000000',
-            tokenName: config.nativeToken,
-            symbol: config.nativeToken,
-            decimals: config.nativeDecimals.toString(),
-            tokenType: 'native'
-          }
-        };
+        result['native'] = nativeBalance;
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`Error fetching native balance for ${chain}:`, errorMessage);
       }
       
-      // Skip token fetching for non-supported chains or if no API key
-      if (!config.baseUrl || !config.apiKey) {
-        return result;
-      }
       
-      // Process in batches to avoid rate limiting
+      
+      // Process discovered tokens in batches
       const BATCH_SIZE = 10;
-      for (let i = 0; i < tokenAddresses.length; i += BATCH_SIZE) {
-        const batch = tokenAddresses.slice(i, i + BATCH_SIZE);
-        const batchPromises = batch.map(async (tokenAddress) => {
+      for (let i = 0; i < discoveredTokens.length; i += BATCH_SIZE) {
+        const batch = discoveredTokens.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (token) => {
           try {
-            const [balance, info] = await Promise.all([
-              this.getTokenBalance(chain, walletAddress, tokenAddress),
-              this.getTokenInfo(chain, tokenAddress)
-            ]);
-            
-            return { tokenAddress, data: { balance, info } };
+            const balance = await this.getTokenBalance(chain, walletAddress, token.address);
+            // Token info (name, symbol, decimals) is already partially available from tokentx
+            // We can augment it or use it directly if getTokenInfo fails or is redundant
+            let info: TokenInfo | null = {
+                contractAddress: token.address,
+                tokenName: token.symbol, // Placeholder, getTokenInfo might provide a fuller name
+                symbol: token.symbol,
+                decimals: token.decimals.toString(),
+                tokenType: 'erc20'
+            };
+            try {
+                const moreInfo = await this.getTokenInfo(chain, token.address);
+                if (moreInfo) info = moreInfo;
+            } catch (infoError) {
+                console.warn(`Could not fetch detailed info for ${token.symbol} (${token.address}), using basic info.`);
+            }
+            return { tokenAddress: token.address, data: { balance, info } };
           } catch (error) {
-            console.error(`Error fetching data for token ${tokenAddress}:`, error);
-            return { tokenAddress, data: { balance: '0', info: null } };
+            console.error(`Error fetching data for token ${token.symbol} (${token.address}):`, error);
+            return { tokenAddress: token.address, data: { balance: '0', info: null } };
           }
         });
 
@@ -215,7 +258,7 @@ class TokenService {
         });
 
         // Add a small delay between batches
-        if (i + BATCH_SIZE < tokenAddresses.length) {
+        if (i + BATCH_SIZE < discoveredTokens.length) {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
@@ -228,9 +271,9 @@ class TokenService {
     }
   }
 
-  public async getNativeBalance(chain: string, walletAddress: string): Promise<string> {
-    const config = this.getApiConfig(chain);
-    const cacheKey = `native_${chain}_${walletAddress}`;
+  public async getNativeBalance(chainKey: string, walletAddress: string): Promise<TokenData> {
+    const config = this.getApiConfig(chainKey);
+    const cacheKey = `native_${chainKey}_${walletAddress}`;
     
     return this.getWithCache(cacheKey, async () => {
       // For EVM chains with block explorer support, fetch token balances
@@ -247,25 +290,45 @@ class TokenService {
           });
 
           if (response.data.status === '1') {
-            return response.data.result;
+            const chainConfig = chains[chainKey as keyof typeof chains];
+            if (!chainConfig) {
+              throw new Error(`Unsupported chain: ${chainKey}`);
+            }
+            return {
+              balance: response.data.result,
+              info: {
+                symbol: chainConfig.nativeCurrency.symbol,
+                tokenName: chainConfig.nativeCurrency.name,
+                decimals: chainConfig.nativeCurrency.decimals.toString(),
+                tokenType: 'NATIVE',
+                contractAddress: ZeroAddress // Native token represented by ZeroAddress
+              }
+            };
           }
           console.warn(`Failed to fetch native balance from explorer: ${response.data.message}`);
         } catch (error: unknown) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          console.warn(`Error fetching native balance from explorer: ${errorMessage}`);
+          console.warn(`API key for ${chainKey} not configured. Cannot fetch native balance via API.`);
         }
       }
-
-      // Fallback to direct RPC call for all chains
-      try {
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-        const balance = await provider.getBalance(walletAddress);
-        return balance.toString();
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Failed to fetch native balance via RPC: ${errorMessage}`);
-        throw new Error(`Failed to fetch native balance: ${errorMessage}`);
+      
+      // Fallback to RPC if API key is missing or API call fails for native balance
+      const provider = new JsonRpcProvider(chains[chainKey as keyof typeof chains].rpcUrl);
+      const balance = await provider.getBalance(walletAddress);
+      const chainConfig = chains[chainKey as keyof typeof chains];
+      if (!chainConfig) {
+        throw new Error(`Unsupported chain: ${chainKey}`);
       }
+      return {
+        balance: balance.toString(),
+        info: {
+          symbol: chainConfig.nativeCurrency.symbol,
+          tokenName: chainConfig.nativeCurrency.name,
+          decimals: chainConfig.nativeCurrency.decimals.toString(),
+          tokenType: 'NATIVE',
+          contractAddress: ZeroAddress // Native token represented by ZeroAddress
+        }
+      };
     });
   }
 }

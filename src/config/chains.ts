@@ -14,7 +14,7 @@ export const chains: Record<string, ChainConfig> = {
   ethereum: {
     name: 'Ethereum Mainnet',
     chainId: 1,
-    rpcUrl: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
+    rpcUrl: 'https://ethereum-rpc.publicnode.com',  // Public Ethereum RPC
     explorerUrl: 'https://etherscan.io',
     nativeCurrency: {
       name: 'Ethereum',
@@ -25,7 +25,7 @@ export const chains: Record<string, ChainConfig> = {
   base: {
     name: 'Base',
     chainId: 8453,
-    rpcUrl: `https://base-mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
+    rpcUrl: 'https://mainnet.base.org',  // Public Base RPC
     explorerUrl: 'https://basescan.org',
     nativeCurrency: {
       name: 'Ethereum',
