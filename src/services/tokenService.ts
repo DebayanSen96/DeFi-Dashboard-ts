@@ -44,12 +44,24 @@ class TokenService {
   }
 
   private getApiConfig(chain: string) {
+    const chainLower = chain.toLowerCase();
+    const chainConfig = chains[chainLower as keyof typeof chains];
+    
+    if (!chainConfig) {
+      throw new Error(`Unsupported chain: ${chain}`);
+    }
+
     const config = {
       baseUrl: '',
       apiKey: '',
+      rpcUrl: chainConfig.rpcUrl,
+      nativeToken: chainConfig.nativeCurrency.symbol,
+      nativeDecimals: chainConfig.nativeCurrency.decimals,
+      chainId: chainConfig.chainId
     };
 
-    switch (chain.toLowerCase()) {
+    // Configure block explorer APIs for supported chains
+    switch (chainLower) {
       case 'ethereum':
         config.baseUrl = 'https://api.etherscan.io/api';
         config.apiKey = process.env.ETHERSCAN_API_KEY || '';
@@ -58,12 +70,12 @@ class TokenService {
         config.baseUrl = 'https://api.basescan.org/api';
         config.apiKey = process.env.BASESCAN_API_KEY || '';
         break;
-      default:
-        throw new Error(`Unsupported chain: ${chain}`);
+      // Bittensor and Monad will only use RPC
     }
 
-    if (!config.apiKey) {
-      throw new Error(`API key not configured for ${chain}`);
+    // Only require API key for chains that use block explorers
+    if ((chainLower === 'ethereum' || chainLower === 'base') && !config.apiKey) {
+      console.warn(`API key not configured for ${chain}, falling back to RPC only`);
     }
 
     return config;
@@ -148,65 +160,112 @@ class TokenService {
     });
   }
 
-  public async getTokenBalances(chain: string, walletAddress: string, tokenAddresses: string[]): Promise<Record<string, TokenData>> {
-    const results: Record<string, TokenData> = {};
+  public async getTokenBalances(chain: string, walletAddress: string, tokenAddresses: string[] = []): Promise<Record<string, TokenData>> {
+    const result: Record<string, TokenData> = {};
     
-    // Process in batches to avoid rate limiting
-    const BATCH_SIZE = 10;
-    for (let i = 0; i < tokenAddresses.length; i += BATCH_SIZE) {
-      const batch = tokenAddresses.slice(i, i + BATCH_SIZE);
-      const batchPromises = batch.map(async (tokenAddress) => {
-        try {
-          const [balance, info] = await Promise.all([
-            this.getTokenBalance(chain, walletAddress, tokenAddress),
-            this.getTokenInfo(chain, tokenAddress)
-          ]);
-          
-          return { tokenAddress, data: { balance, info } };
-        } catch (error) {
-          console.error(`Error fetching data for token ${tokenAddress}:`, error);
-          return { tokenAddress, data: { balance: '0', info: null } };
-        }
-      });
-
-      const batchResults = await Promise.all(batchPromises);
+    try {
+      const config = this.getApiConfig(chain);
       
-      // Merge batch results
-      batchResults.forEach(({ tokenAddress, data }) => {
-        results[tokenAddress] = data;
-      });
-
-      // Add a small delay between batches
-      if (i + BATCH_SIZE < tokenAddresses.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // Always fetch native token balance first
+      try {
+        const nativeBalance = await this.getNativeBalance(chain, walletAddress);
+        result['native'] = {
+          balance: nativeBalance,
+          info: {
+            contractAddress: '0x0000000000000000000000000000000000000000',
+            tokenName: config.nativeToken,
+            symbol: config.nativeToken,
+            decimals: config.nativeDecimals.toString(),
+            tokenType: 'native'
+          }
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Error fetching native balance for ${chain}:`, errorMessage);
       }
-    }
+      
+      // Skip token fetching for non-supported chains or if no API key
+      if (!config.baseUrl || !config.apiKey) {
+        return result;
+      }
+      
+      // Process in batches to avoid rate limiting
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < tokenAddresses.length; i += BATCH_SIZE) {
+        const batch = tokenAddresses.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (tokenAddress) => {
+          try {
+            const [balance, info] = await Promise.all([
+              this.getTokenBalance(chain, walletAddress, tokenAddress),
+              this.getTokenInfo(chain, tokenAddress)
+            ]);
+            
+            return { tokenAddress, data: { balance, info } };
+          } catch (error) {
+            console.error(`Error fetching data for token ${tokenAddress}:`, error);
+            return { tokenAddress, data: { balance: '0', info: null } };
+          }
+        });
 
-    return results;
+        const batchResults = await Promise.all(batchPromises);
+        
+        // Merge batch results
+        batchResults.forEach(({ tokenAddress, data }) => {
+          result[tokenAddress] = data;
+        });
+
+        // Add a small delay between batches
+        if (i + BATCH_SIZE < tokenAddresses.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      return result;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`Error fetching token balances for ${chain}:`, errorMessage);
+      return {};
+    }
   }
 
   public async getNativeBalance(chain: string, walletAddress: string): Promise<string> {
-    const cacheKey = `native_balance_${chain}_${walletAddress}`;
+    const config = this.getApiConfig(chain);
+    const cacheKey = `native_${chain}_${walletAddress}`;
     
     return this.getWithCache(cacheKey, async () => {
-      const { baseUrl, apiKey } = this.getApiConfig(chain);
-      
-      const response = await axios.get<TokenBalanceResponse>(baseUrl, {
-        params: {
-          module: 'account',
-          action: 'balance',
-          address: walletAddress,
-          tag: 'latest',
-          apikey: apiKey,
-        },
-        timeout: 10000,
-      });
+      // For EVM chains with block explorer support, fetch token balances
+      if (config.baseUrl && config.apiKey) {
+        try {
+          const response = await axios.get(config.baseUrl, {
+            params: {
+              module: 'account',
+              action: 'balance',
+              address: walletAddress,
+              tag: 'latest',
+              apikey: config.apiKey,
+            },
+          });
 
-      if (response.data.status !== '1') {
-        throw new Error(`API error: ${response.data.message}`);
+          if (response.data.status === '1') {
+            return response.data.result;
+          }
+          console.warn(`Failed to fetch native balance from explorer: ${response.data.message}`);
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(`Error fetching native balance from explorer: ${errorMessage}`);
+        }
       }
 
-      return response.data.result;
+      // Fallback to direct RPC call for all chains
+      try {
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const balance = await provider.getBalance(walletAddress);
+        return balance.toString();
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Failed to fetch native balance via RPC: ${errorMessage}`);
+        throw new Error(`Failed to fetch native balance: ${errorMessage}`);
+      }
     });
   }
 }

@@ -12,9 +12,9 @@ interface ChainConfig {
 
 export const chains: Record<string, ChainConfig> = {
   ethereum: {
-    name: 'Ethereum',
+    name: 'Ethereum Mainnet',
     chainId: 1,
-    rpcUrl: process.env.ETHEREUM_RPC_URL || `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
+    rpcUrl: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
     explorerUrl: 'https://etherscan.io',
     nativeCurrency: {
       name: 'Ethereum',
@@ -25,7 +25,7 @@ export const chains: Record<string, ChainConfig> = {
   base: {
     name: 'Base',
     chainId: 8453,
-    rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+    rpcUrl: `https://base-mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
     explorerUrl: 'https://basescan.org',
     nativeCurrency: {
       name: 'Ethereum',
@@ -35,9 +35,9 @@ export const chains: Record<string, ChainConfig> = {
   },
   bittensor: {
     name: 'Bittensor EVM Testnet',
-    chainId: 3639,
-    rpcUrl: 'https://testnet.bittensor.com/rpc',
-    explorerUrl: 'https://testnet.bittensor.com',
+    chainId: 945,
+    rpcUrl: 'https://test.chain.opentensor.ai',
+    explorerUrl: '',
     nativeCurrency: {
       name: 'Tao',
       symbol: 'TAO',
@@ -46,9 +46,9 @@ export const chains: Record<string, ChainConfig> = {
   },
   monad: {
     name: 'Monad Testnet',
-    chainId: 1088,
+    chainId: 10143,
     rpcUrl: 'https://testnet-rpc.monad.xyz',
-    explorerUrl: 'https://testnet-explorer.monad.xyz',
+    explorerUrl: '',
     nativeCurrency: {
       name: 'Monad',
       symbol: 'MON',
