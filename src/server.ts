@@ -205,7 +205,12 @@ app.get('/positions', async (req: Request, res: Response) => {
     }
     
     // Initialize protocol services
-    const provider = new JsonRpcProvider(process.env.ETHEREUM_RPC_URL);
+    const infuraKey = process.env.INFURA_KEY;
+    if (!infuraKey) {
+      throw new Error('INFURA_KEY is not set in the environment variables. Please check your .env file.');
+    }
+    const ethereumRpcUrl = `https://mainnet.infura.io/v3/${infuraKey}`;
+    const provider = new JsonRpcProvider(ethereumRpcUrl);
     const positions: Record<string, any> = {};
     
     // Fetch positions from each protocol
@@ -230,7 +235,7 @@ app.get('/positions', async (req: Request, res: Response) => {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Error fetching ${protocol} positions:`, errorMessage);
+        console.error(`Error fetching ${protocol} positions:`, error);
         positions[protocol] = { error: `Failed to fetch ${protocol} positions: ${errorMessage}` };
       }
     }

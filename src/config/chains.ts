@@ -15,7 +15,7 @@ export const chains: Record<string, ChainConfig> = {
   ethereum: {
     name: 'Ethereum Mainnet',
     chainId: 1,
-    rpcUrl: 'https://ethereum-rpc.publicnode.com',  // Public Ethereum RPC
+    rpcUrl: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,  // Public Ethereum RPC
     explorerUrl: 'https://etherscan.io',
     nativeCurrency: {
       name: 'Ethereum',
@@ -27,7 +27,7 @@ export const chains: Record<string, ChainConfig> = {
   base: {
     name: 'Base',
     chainId: 8453,
-    rpcUrl: 'https://mainnet.base.org',  // Public Base RPC
+    rpcUrl: `https://base-mainnet.infura.io/v3/${process.env.INFURA_KEY}`,  // Public Base RPC
     explorerUrl: 'https://basescan.org',
     nativeCurrency: {
       name: 'Ethereum', // Base uses ETH as its native currency

@@ -187,7 +187,7 @@ export class AaveService {
             const borrowAPY = (parseFloat(formatUnits(currentVariableBorrowRate, 25)) / 100).toFixed(2);
 
             // Only include positions with non-zero balances
-            if (aTokenBalance.gt(0) || stableDebt.gt(0) || variableDebt.gt(0)) {
+            if (aTokenBalance > 0n || stableDebt > 0n || variableDebt > 0n) {
               return {
                 asset,
                 symbol,
