@@ -184,7 +184,7 @@ export class PriceService {
         }
       }
 
-      const balance = parseFloat(ethers.formatUnits(token.balance, token.decimals));
+      const balance = parseFloat(ethers.formatUnits(token.balance, parseInt(token.decimals, 10)));
       const valueUSD = balance * price;
       
       const valuedToken = { ...token, valueUSD };
