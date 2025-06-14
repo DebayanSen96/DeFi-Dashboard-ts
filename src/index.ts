@@ -1,102 +1,142 @@
 #!/usr/bin/env node
 
-import 'dotenv/config';
+import { Command } from 'commander';
 import { ethers } from 'ethers';
-import { getProvider } from './utils/providers';
+import dotenv from 'dotenv';
+import path from 'path';
+import { startServer } from './server';
 import { AaveService } from './services/aaveService';
 import { LidoService } from './services/lidoService';
 import { YearnService } from './services/yearnService';
+import { getProvider } from './utils/providers';
+import { protocols } from './config/protocols';
 import { chains } from './config/chains';
+import { ChainConfig } from './types';
 
-async function main() {
-  const args = process.argv.slice(2);
-  
-  if (args.length === 0 || args[0] === '--help') {
-    console.log('Usage: npm start <wallet-address> [chain]');
-    console.log('\nSupported chains:');
-    Object.entries(chains).forEach(([key, chain]) => {
-      console.log(`  ${key.padEnd(15)} - ${chain.name} (Chain ID: ${chain.chainId})`);
-    });
-    process.exit(0);
-  }
+// Load environment variables from .env file in project root
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-  const walletAddress = args[0];
-  const chainName = args[1] || 'ethereum';
+// Check for required environment variables
+const requiredEnvVars = ['INFURA_KEY', 'ETHERSCAN_API_KEY', 'BASESCAN_API_KEY'];
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 
-  if (!ethers.utils.isAddress(walletAddress)) {
-    console.error('Error: Invalid wallet address');
-    process.exit(1);
-  }
-
-  if (!chains[chainName as keyof typeof chains]) {
-    console.error(`Error: Unsupported chain '${chainName}'. Use --help to see supported chains.`);
-    process.exit(1);
-  }
-
-  try {
-    const provider = getProvider(chainName);
-    console.log(`\nFetching DeFi positions for ${walletAddress} on ${chains[chainName as keyof typeof chains].name}...\n`);
-
-    // Fetch and display AAVE positions
-    try {
-      const aaveService = new AaveService(provider, walletAddress);
-      const aavePositions = await aaveService.getPositions();
-      
-      if (aavePositions.length > 0) {
-        console.log('=== AAVE POSITIONS ===');
-        console.table(aavePositions.map(p => ({
-          Asset: p.symbol,
-          Supplied: p.supplied,
-          Borrowed: p.borrowed,
-          'Supply APY': `${p.supplyAPY}%`,
-          'Borrow APY': `${p.borrowAPY}%`
-        })));
-      }
-    } catch (error) {
-      console.error('Error fetching AAVE positions:', error instanceof Error ? error.message : String(error));
-    }
-
-    // Fetch and display LIDO positions
-    try {
-      const lidoService = new LidoService(provider, walletAddress);
-      const lidoPositions = await lidoService.getPositions();
-      
-      if (lidoPositions.length > 0) {
-        console.log('\n=== LIDO STAKING ===');
-        console.table(lidoPositions.map(p => ({
-          Asset: p.symbol,
-          Staked: p.staked,
-          'Staked in ETH': p.stakedInEth,
-          Type: p.isWrapped ? 'Wrapped (wstETH)' : 'Direct (stETH)'
-        })));
-      }
-    } catch (error) {
-      console.error('\nError fetching LIDO positions:', error instanceof Error ? error.message : String(error));
-    }
-
-    // Fetch and display YEARN positions
-    try {
-      const yearnService = new YearnService(provider, walletAddress);
-      const yearnPositions = await yearnService.getPositions();
-      
-      if (yearnPositions.length > 0) {
-        console.log('\n=== YEARN VAULTS ===');
-        console.table(yearnPositions.map(p => ({
-          Vault: p.vaultSymbol,
-          'Underlying': p.tokenSymbol,
-          'Vault Balance': p.balance,
-          'Underlying Value': p.underlyingBalance,
-          'Price per Share': p.pricePerShare
-        })));
-      }
-    } catch (error) {
-      console.error('\nError fetching Yearn positions:', error instanceof Error ? error.message : String(error));
-    }
-
-  } catch (error) {
-    console.error('\nError:', error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
+if (missingEnvVars.length > 0) {
+  console.error(`Error: Missing required environment variables: ${missingEnvVars.join(', ')}`);
+  console.error(`Please create a .env file in the project root based on .env.example`);
+  process.exit(1);
 }
 
-main().catch(console.error);
+// Initialize CLI
+const program = new Command();
+program.help();
+program
+  .name('defi-dashboard')
+  .description('CLI for DeFi Portfolio Dashboard')
+  .version('1.0.0');
+
+// Command: Check wallet positions
+program
+  .command('positions <walletAddress>')
+  .description('Fetch DeFi positions for a wallet')
+  .option('-c, --chain <chain>', 'Blockchain to query (default: ethereum)', 'ethereum')
+  .option('-p, --protocols <protocols>', 'Comma-separated list of protocols to check (aave,lido,yearn)')
+  .action(async (walletAddress: string, options: { chain: string; protocols?: string }) => {
+    const chainName = options.chain.toLowerCase();
+    
+    // Validate wallet address
+    if (!ethers.isAddress(walletAddress)) {
+      console.error('Error: Invalid wallet address');
+      process.exit(1);
+    }
+
+    // Validate chain
+    if (!Object.keys(chains).includes(chainName)) {
+      console.error(`Error: Unsupported chain '${chainName}'. Supported chains: ${Object.keys(chains).join(', ')}`);
+      process.exit(1);
+    }
+
+    const chainConfig = chains[chainName as keyof typeof chains];
+    console.log(`\nFetching DeFi positions for ${walletAddress} on ${chainConfig.name}...\n`);
+
+    const provider = getProvider(chainName);
+    let targetProtocols = ['aave', 'lido', 'yearn'];
+    
+    // Filter protocols if specified
+    if (options.protocols) {
+      const requestedProtocols = options.protocols.split(',').map((p: string) => p.trim().toLowerCase());
+      targetProtocols = targetProtocols.filter(p => requestedProtocols.includes(p));
+      
+      if (targetProtocols.length === 0) {
+        console.error('Error: No valid protocols specified');
+        process.exit(1);
+      }
+    }
+
+    try {
+      // Get AAVE positions
+      if (targetProtocols.includes('aave') && protocols.aave[chainName as keyof typeof protocols.aave]) {
+        console.log('=== AAVE POSITIONS ===');
+        const aaveService = new AaveService(provider, walletAddress);
+        const aavePositions = await aaveService.getPositions();
+        
+        if (aavePositions && aavePositions.length > 0) {
+          console.table(aavePositions);
+        } else {
+          console.log('No AAVE positions found\n');
+        }
+      }
+      
+      // Get Lido positions (only on Ethereum)
+      if (targetProtocols.includes('lido') && chainName === 'ethereum' && protocols.lido.ethereum) {
+        console.log('=== LIDO POSITIONS ===');
+        const lidoService = new LidoService(provider, walletAddress);
+        const lidoPositions = await lidoService.getPositions();
+        
+        if (lidoPositions && lidoPositions.length > 0) {
+          console.table(lidoPositions);
+        } else {
+          console.log('No Lido positions found\n');
+        }
+      }
+
+      // Get Yearn positions (only on Ethereum)
+      if (targetProtocols.includes('yearn') && chainName === 'ethereum' && protocols.yearn.ethereum) {
+        console.log('=== YEARN POSITIONS ===');
+        const yearnService = new YearnService(provider, walletAddress);
+        const yearnPositions = await yearnService.getPositions();
+        
+        if (yearnPositions && yearnPositions.length > 0) {
+          console.table(yearnPositions.map(p => ({
+            Vault: p.vaultSymbol,
+            'Underlying': p.tokenSymbol,
+            'Vault Balance': p.balance,
+            'Underlying Value': p.underlyingBalance,
+            'Price per Share': p.pricePerShare
+          })));
+        } else {
+          console.log('No Yearn positions found\n');
+        }
+      }
+    } catch (error) {
+      console.error('\nError:', error instanceof Error ? error.message : 'An unknown error occurred');
+      process.exit(1);
+    }
+  });
+
+// Start the server
+program
+  .command('server')
+  .description('Start the DeFi Dashboard API server')
+  .option('-p, --port <port>', 'Port to run the server on', '3000')
+  .action((options: { port: string }) => {
+    process.env.PORT = options.port;
+    startServer();
+  });
+
+// Show help if no arguments
+if (process.argv.length <= 2) {
+  program.help();
+}
+
+// Parse command line arguments
+program.parse(process.argv);

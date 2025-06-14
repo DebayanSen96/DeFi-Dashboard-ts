@@ -1,4 +1,4 @@
-import { ethers } from 'ethers';
+import { ethers, JsonRpcProvider, formatUnits } from 'ethers';
 import { protocols } from '../config/protocols';
 import { abis } from '../config/abis';
 import { chains } from '../config/chains';
@@ -12,17 +12,17 @@ interface LidoPosition {
 }
 
 export class LidoService {
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: JsonRpcProvider;
   private walletAddress: string;
   
-  constructor(provider: ethers.providers.JsonRpcProvider, walletAddress: string) {
+  constructor(provider: JsonRpcProvider, walletAddress: string) {
     this.provider = provider;
     this.walletAddress = walletAddress;
   }
 
   async getPositions(): Promise<LidoPosition[]> {
     const network = await this.provider.getNetwork();
-    const chainId = network.chainId;
+    const chainId = Number(network.chainId); // Convert to number for comparison
     const chainName = Object.keys(chains).find(
       (key) => chains[key as keyof typeof chains].chainId === chainId
     );
@@ -51,8 +51,8 @@ export class LidoService {
       positions.push({
         asset: config.stETH,
         symbol: stEthSymbol,
-        staked: ethers.utils.formatUnits(stEthBalance, stEthDecimals),
-        stakedInEth: ethers.utils.formatUnits(stEthBalance, stEthDecimals),
+        staked: formatUnits(stEthBalance, stEthDecimals),
+        stakedInEth: formatUnits(stEthBalance, stEthDecimals),
         isWrapped: false,
       });
     }
@@ -74,7 +74,7 @@ export class LidoService {
       positions.push({
         asset: config.wstETH,
         symbol: wstEthSymbol,
-        staked: ethers.utils.formatUnits(wstEthBalance, wstEthDecimals),
+        staked: formatUnits(wstEthBalance, wstEthDecimals),
         stakedInEth: '0', // Would need price oracle to convert to ETH
         isWrapped: true,
       });

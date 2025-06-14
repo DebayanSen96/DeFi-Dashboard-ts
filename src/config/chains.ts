@@ -2,32 +2,57 @@ interface ChainConfig {
   name: string;
   chainId: number;
   rpcUrl: string;
-  blockExplorer: string;
+  explorerUrl: string;
+  nativeCurrency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
 }
 
 export const chains: Record<string, ChainConfig> = {
   ethereum: {
-    name: 'Ethereum Mainnet',
+    name: 'Ethereum',
     chainId: 1,
-    rpcUrl: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
-    blockExplorer: 'https://etherscan.io',
+    rpcUrl: process.env.ETHEREUM_RPC_URL || `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
+    explorerUrl: 'https://etherscan.io',
+    nativeCurrency: {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      decimals: 18,
+    },
   },
   base: {
     name: 'Base',
     chainId: 8453,
-    rpcUrl: 'https://mainnet.base.org',
-    blockExplorer: 'https://basescan.org',
+    rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+    explorerUrl: 'https://basescan.org',
+    nativeCurrency: {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      decimals: 18,
+    },
   },
   bittensor: {
     name: 'Bittensor EVM Testnet',
-    chainId: 3637,
+    chainId: 3639,
     rpcUrl: 'https://testnet.bittensor.com/rpc',
-    blockExplorer: 'https://testnet.bittensor.com',
+    explorerUrl: 'https://testnet.bittensor.com',
+    nativeCurrency: {
+      name: 'Tao',
+      symbol: 'TAO',
+      decimals: 18,
+    },
   },
   monad: {
     name: 'Monad Testnet',
-    chainId: 52372,
-    rpcUrl: 'https://testnet.monad.xyz',
-    blockExplorer: 'https://testnet-explorer.monad.xyz',
+    chainId: 1088,
+    rpcUrl: 'https://testnet-rpc.monad.xyz',
+    explorerUrl: 'https://testnet-explorer.monad.xyz',
+    nativeCurrency: {
+      name: 'Monad',
+      symbol: 'MON',
+      decimals: 18,
+    },
   },
 } as const;

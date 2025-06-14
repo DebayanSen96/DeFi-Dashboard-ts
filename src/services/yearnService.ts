@@ -1,4 +1,4 @@
-import { ethers } from 'ethers';
+import { ethers, JsonRpcProvider, formatUnits, parseUnits } from 'ethers';
 import { protocols } from '../config/protocols';
 import { abis } from '../config/abis';
 import { chains } from '../config/chains';
@@ -19,17 +19,17 @@ interface YearnVaultPosition {
 }
 
 export class YearnService {
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: JsonRpcProvider;
   private walletAddress: string;
   
-  constructor(provider: ethers.providers.JsonRpcProvider, walletAddress: string) {
+  constructor(provider: JsonRpcProvider, walletAddress: string) {
     this.provider = provider;
     this.walletAddress = walletAddress;
   }
 
   async getPositions(): Promise<YearnVaultPosition[]> {
     const network = await this.provider.getNetwork();
-    const chainId = network.chainId;
+    const chainId = Number(network.chainId); // Convert to number for comparison
     const chainName = Object.keys(chains).find(
       (key) => chains[key as keyof typeof chains].chainId === chainId
     ) as keyof typeof chains;
@@ -65,8 +65,8 @@ export class YearnService {
           vaultContract.symbol()
         ]);
 
-        if (balance.gt(0)) {
-          const underlyingBalance = balance.mul(pricePerShare).div(ethers.utils.parseUnits('1', decimals));
+        if (balance > 0n) {
+          const underlyingBalance = (BigInt(balance) * BigInt(pricePerShare)) / (10n ** BigInt(decimals));
           
           // Get the underlying token info
           const tokenContract = new ethers.Contract(
@@ -88,9 +88,9 @@ export class YearnService {
             vaultSymbol: symbol as string,
             tokenAddress: tokenAddress as string,
             tokenSymbol,
-            balance: ethers.utils.formatUnits(balance, decimals),
-            pricePerShare: ethers.utils.formatUnits(pricePerShare, decimals),
-            underlyingBalance: ethers.utils.formatUnits(underlyingBalance, decimals),
+            balance: formatUnits(balance, decimals),
+            pricePerShare: formatUnits(pricePerShare, decimals),
+            underlyingBalance: formatUnits(underlyingBalance, decimals),
           });
         }
       } catch (error) {

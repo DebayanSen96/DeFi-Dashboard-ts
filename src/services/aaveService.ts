@@ -1,4 +1,4 @@
-import { ethers } from 'ethers';
+import { ethers, JsonRpcProvider, BigNumberish, Contract, ZeroAddress, formatUnits } from 'ethers';
 import { protocols } from '../config/protocols';
 import { abis } from '../config/abis';
 import { chains } from '../config/chains';
@@ -8,21 +8,21 @@ interface AaveReserveData {
   aTokenAddress: string;
   stableDebtTokenAddress: string;
   variableDebtTokenAddress: string;
-  liquidityRate: ethers.BigNumber;
-  variableBorrowRate: ethers.BigNumber;
-  stableBorrowRate: ethers.BigNumber;
+  liquidityRate: bigint;
+  variableBorrowRate: bigint;
+  stableBorrowRate: bigint;
   decimals: number;
   ltv: number;
 }
 
 interface AaveUserReserveData {
-  currentATokenBalance: ethers.BigNumber;
-  currentStableDebt: ethers.BigNumber;
-  currentVariableDebt: ethers.BigNumber;
-  principalStableDebt: ethers.BigNumber;
-  scaledVariableDebt: ethers.BigNumber;
-  stableBorrowRate: ethers.BigNumber;
-  liquidityRate: ethers.BigNumber;
+  currentATokenBalance: bigint;
+  currentStableDebt: bigint;
+  currentVariableDebt: bigint;
+  principalStableDebt: bigint;
+  scaledVariableDebt: bigint;
+  stableBorrowRate: bigint;
+  liquidityRate: bigint;
   stableRateLastUpdated: number;
   usageAsCollateralEnabled: boolean;
 }
@@ -37,17 +37,17 @@ interface AavePosition {
 }
 
 export class AaveService {
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: JsonRpcProvider;
   private walletAddress: string;
   
-  constructor(provider: ethers.providers.JsonRpcProvider, walletAddress: string) {
+  constructor(provider: JsonRpcProvider, walletAddress: string) {
     this.provider = provider;
     this.walletAddress = walletAddress;
   }
 
   async getPositions(): Promise<AavePosition[]> {
     const network = await this.provider.getNetwork();
-    const chainId = network.chainId;
+    const chainId = Number(network.chainId); // Convert to number for comparison
     const chainName = Object.keys(chains).find(
       (key) => chains[key as keyof typeof chains].chainId === chainId
     ) as keyof typeof chains;
@@ -101,7 +101,7 @@ export class AaveService {
         allReserves = allReserves.filter(
           (reserve: { tokenAddress: string }) => 
             reserve.tokenAddress && 
-            reserve.tokenAddress !== ethers.constants.AddressZero
+            reserve.tokenAddress !== ZeroAddress
         );
       } catch (error) {
         console.error('Error fetching AAVE reserves:', error);
@@ -113,7 +113,7 @@ export class AaveService {
         const asset = reserve.tokenAddress;
         
         // Skip zero address or invalid tokens
-        if (!asset || asset === ethers.constants.AddressZero) {
+        if (!asset || asset === ZeroAddress) {
           return null;
         }
         try {
@@ -159,33 +159,32 @@ export class AaveService {
             );
             
             const [aTokenBalance, stableDebt, variableDebt] = await Promise.all([
-              aTokenContract.balanceOf(this.walletAddress).catch(() => ethers.BigNumber.from(0)),
-              new ethers.Contract(
+              aTokenContract.balanceOf(this.walletAddress).catch(() => 0n),
+              new Contract(
                 reserveData[8], // stable debt token
                 abis.erc20,
                 this.provider
-              ).balanceOf(this.walletAddress).catch(() => ethers.BigNumber.from(0)),
-              new ethers.Contract(
+              ).balanceOf(this.walletAddress).catch(() => 0n),
+              new Contract(
                 reserveData[9], // variable debt token
                 abis.erc20,
                 this.provider
-              ).balanceOf(this.walletAddress).catch(() => ethers.BigNumber.from(0))
+              ).balanceOf(this.walletAddress).catch(() => 0n)
             ]);
             
             // Calculate APYs (rates are in RAY units, 1e27)
-            const liquidityRate = reserveData[2] || ethers.BigNumber.from(0);
-            const currentVariableBorrowRate = reserveData[4] || ethers.BigNumber.from(0);
+            const liquidityRate = BigInt(reserveData[2] || 0);
+            const currentVariableBorrowRate = BigInt(reserveData[4] || 0);
             
             // Format values
-            const supplied = parseFloat(ethers.utils.formatUnits(aTokenBalance, decimals)).toFixed(6);
-            const borrowed = parseFloat(ethers.utils.formatUnits(
-              stableDebt.add(variableDebt),
+            const supplied = parseFloat(formatUnits(aTokenBalance, decimals)).toFixed(6);
+            const borrowed = parseFloat(formatUnits(
+              stableDebt + variableDebt,
               decimals
             )).toFixed(6);
             
-            // Convert rates to APY percentages
-            const supplyAPY = (parseFloat(ethers.utils.formatUnits(liquidityRate, 25)) / 100).toFixed(2);
-            const borrowAPY = (parseFloat(ethers.utils.formatUnits(currentVariableBorrowRate, 25)) / 100).toFixed(2);
+            const supplyAPY = (parseFloat(formatUnits(liquidityRate, 25)) / 100).toFixed(2);
+            const borrowAPY = (parseFloat(formatUnits(currentVariableBorrowRate, 25)) / 100).toFixed(2);
 
             // Only include positions with non-zero balances
             if (aTokenBalance.gt(0) || stableDebt.gt(0) || variableDebt.gt(0)) {

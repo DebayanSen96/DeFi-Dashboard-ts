@@ -167,6 +167,342 @@ Or with Node directly:
 node src/index.js 0xYourWalletAddressHere
 ```
 
+## API Endpoints and Data Flow
+
+### Available Endpoints
+
+1. **GET /tokens**
+   - **Purpose**: Fetch token balances across all supported chains
+   - **Request Body**:
+     ```json
+     {
+       "walletAddress": "0x...",
+       "chains": ["ethereum", "base"] // optional, all chains if empty
+     }
+     ```
+   - **Response**:
+     ```json
+     {
+       "tokens": [...],
+       "valuation": {
+         "total": 1234.56,
+         "byChain": {
+           "ethereum": 1000.00,
+           "base": 234.56
+         }
+       }
+     }
+     ```
+
+2. **GET /positions**
+   - **Purpose**: Fetch DeFi protocol positions (Aave, Lido, etc.)
+   - **Request Body**:
+     ```json
+     {
+       "walletAddress": "0x...",
+       "protocols": ["aave", "lido"] // optional, all protocols if empty
+     }
+     ```
+   - **Response**:
+     ```json
+     {
+       "positions": {
+         "aave": { ... },
+         "lido": { ... }
+       }
+     }
+     ```
+
+### Token Balance Service
+
+Located in `src/services/tokenBalanceService.js`, this service handles:
+
+1. **Native Token Balances**
+   - Uses ethers.js to fetch native token balances (ETH, TAO, etc.)
+   - Implements caching with 30-second TTL
+   - Handles different chain providers
+
+2. **ERC20 Token Balances**
+   - Uses Multicall for batch balance queries
+   - Falls back to individual calls if Multicall fails
+   - Caches results to reduce RPC calls
+
+```javascript
+// Example usage
+const tokenService = new TokenBalanceService();
+
+// Get native balance
+const nativeBalance = await tokenService.getNativeBalance(
+  '0x123...', // wallet address
+  'ethereum'   // chain
+);
+
+// Get token balance
+const tokenBalance = await tokenService.getTokenBalance(
+  '0x123...', // wallet address
+  'ethereum',  // chain
+  'USDC',      // token symbol
+  '0xA0b...'   // token address
+);
+```
+
+### Price Service
+
+Located in `src/services/priceService.js`, this service handles:
+
+1. **Native Token Prices**
+   - Fetches prices from Coingecko API
+   - Supports multiple chains (Ethereum, Base, Bittensor)
+   - Implements retry logic with exponential backoff
+
+2. **ERC20 Token Prices**
+   - Fetches token prices by contract address
+   - Handles batching to avoid rate limits
+   - Uses symbol fallback for known tokens
+
+```javascript
+// Example price fetching
+const prices = await PriceService.calculatePortfolioValue(tokenBalances);
+
+// Returns:
+// {
+//   total: 1234.56,
+//   byChain: {
+//     ethereum: 1000.00,
+//     base: 234.56
+//   }
+// }
+```
+
+### Supported Chains
+
+Configured in `src/config/chains.js`:
+
+```javascript
+{
+  ethereum: {
+    name: 'Ethereum Mainnet',
+    chainId: 1,
+    rpcUrl: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
+    blockExplorer: 'https://etherscan.io',
+  },
+  base: {
+    name: 'Base',
+    chainId: 8453,
+    rpcUrl: 'https://mainnet.base.org',
+    blockExplorer: 'https://basescan.org',
+  },
+  // ... other chains
+}
+```
+
+### Rate Limiting and Caching
+
+1. **Coingecko API**
+   - 50 requests/minute for free tier
+   - Implemented retry logic with exponential backoff
+   - Batches token price requests (50 tokens per request)
+
+2. **RPC Nodes**
+   - Uses Infura for Ethereum (requires API key)
+   - Implements 30-second TTL cache for all balance queries
+   - Uses Multicall to batch RPC calls
+
+3. **Error Handling**
+   - Graceful degradation on API failures
+   - Fallback to known token symbols if contract lookup fails
+   - Detailed error logging with chain/token context
+
+### Environment Variables
+
+Required in `.env`:
+
+```env
+# Required
+INFURA_KEY=your_infura_key_here
+
+# Optional
+PORT=3000  # Default API port
+
+# For Coingecko API (fallback)
+COINGECKO_API_KEY=your_coingecko_key_here
+
+# For direct chain RPCs (optional overrides)
+ETHEREUM_RPC_URL=https://mainnet.infura.io/v3/${INFURA_KEY}
+BASE_RPC_URL=https://mainnet.base.org
+```
+
+## Token Price and Data Fetching
+
+### Etherscan API Integration
+
+For fetching token prices and data on Ethereum Mainnet, we use the Etherscan API.
+
+**Base URL:** `https://api.etherscan.io/api`
+
+**Key Endpoints:**
+1. **Get Token Balance**
+   - **Endpoint:** `?module=account&action=tokenbalance`
+   - **Parameters:**
+     - `address`: Wallet address
+     - `contractaddress`: Token contract address
+     - `tag`: latest
+     - `apikey`: Your Etherscan API key
+   - **Example Response:**
+     ```json
+     {
+       "status":"1",
+       "message":"OK",
+       "result":"135499"
+     }
+     ```
+
+2. **Get Token Info**
+   - **Endpoint:** `?module=token&action=tokeninfo`
+   - **Parameters:**
+     - `contractaddress`: Token contract address
+     - `apikey`: Your Etherscan API key
+   - **Example Response:**
+     ```json
+     {
+       "status":"1",
+       "message":"OK",
+       "result": [
+         {
+           "contractAddress":"0x123...",
+           "tokenName":"Example Token",
+           "symbol":"EXMPL",
+           "divisor":"18",
+           "tokenType":"ERC20"
+         }
+       ]
+     }
+     ```
+
+### Basescan API Integration
+
+For Base chain token data, we use the Basescan API.
+
+**Base URL:** `https://api.basescan.org/api`
+
+**Key Endpoints:**
+1. **Get Token Balance**
+   - **Endpoint:** `?module=account&action=tokenbalance`
+   - **Parameters:** Same as Etherscan
+   - **Response Format:** Same as Etherscan
+
+2. **Get Token Info**
+   - **Endpoint:** `?module=token&action=tokeninfo`
+   - **Parameters:** Same as Etherscan
+   - **Response Format:** Same as Etherscan
+
+### Implementation Example
+
+```javascript
+// src/services/tokenService.js
+const axios = require('axios');
+
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
+const BASESCAN_API_KEY = process.env.BASESCAN_API_KEY;
+
+const getTokenBalance = async (chain, address, tokenAddress) => {
+  let baseUrl, apiKey;
+  
+  if (chain === 'ethereum') {
+    baseUrl = 'https://api.etherscan.io/api';
+    apiKey = ETHERSCAN_API_KEY;
+  } else if (chain === 'base') {
+    baseUrl = 'https://api.basescan.org/api';
+    apiKey = BASESCAN_API_KEY;
+  } else {
+    throw new Error('Unsupported chain');
+  }
+
+  try {
+    const response = await axios.get(baseUrl, {
+      params: {
+        module: 'account',
+        action: 'tokenbalance',
+        address,
+        contractaddress: tokenAddress,
+        tag: 'latest',
+        apikey: apiKey
+      }
+    });
+
+    if (response.data.status === '1') {
+      return response.data.result;
+    } else {
+      throw new Error(response.data.message || 'Failed to fetch token balance');
+    }
+  } catch (error) {
+    console.error(`Error fetching ${chain} token balance:`, error);
+    throw error;
+  }
+};
+
+const getTokenInfo = async (chain, tokenAddress) => {
+  let baseUrl, apiKey;
+  
+  if (chain === 'ethereum') {
+    baseUrl = 'https://api.etherscan.io/api';
+    apiKey = ETHERSCAN_API_KEY;
+  } else if (chain === 'base') {
+    baseUrl = 'https://api.basescan.org/api';
+    apiKey = BASESCAN_API_KEY;
+  } else {
+    throw new Error('Unsupported chain');
+  }
+
+  try {
+    const response = await axios.get(baseUrl, {
+      params: {
+        module: 'token',
+        action: 'tokeninfo',
+        contractaddress: tokenAddress,
+        apikey: apiKey
+      }
+    });
+
+    if (response.data.status === '1' && response.data.result.length > 0) {
+      return response.data.result[0];
+    } else {
+      throw new Error(response.data.message || 'Failed to fetch token info');
+    }
+  } catch (error) {
+    console.error(`Error fetching ${chain} token info:`, error);
+    throw error;
+  }
+};
+
+module.exports = {
+  getTokenBalance,
+  getTokenInfo
+};
+```
+
+### Rate Limiting and Error Handling
+
+Both Etherscan and Basescan APIs have rate limits:
+- Free tier: 5 calls per second/IP
+- Pro tier: Higher limits available
+
+**Best Practices:**
+1. Implement request caching (e.g., 1-5 minutes)
+2. Add retry logic with exponential backoff
+3. Handle rate limit responses (HTTP 429)
+4. Use batch requests when possible
+5. Consider using WebSocket subscriptions for real-time data
+
+### Environment Variables
+
+Add these to your `.env` file:
+```env
+# Required for token data
+ETHERSCAN_API_KEY=your_etherscan_api_key_here
+BASESCAN_API_KEY=your_basescan_api_key_here
+```
+
 ## Configuration Files
 
 Details about key configuration files in the `src/config/` directory.
