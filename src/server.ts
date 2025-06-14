@@ -4,6 +4,7 @@ dotenv.config(); // Load environment variables first
 import express, { Request, Response, NextFunction, Application } from 'express';
 import cors from 'cors';
 import { tokenService, TokenData } from './services/tokenService';
+import { PriceService, PriceTokenInput, PortfolioValuation } from './services/priceService';
 import { AaveService } from './services/aaveService';
 import { LidoService } from './services/lidoService';
 import { YearnService } from './services/yearnService';
@@ -43,8 +44,11 @@ interface TokenResponse {
 interface ChainResponse {
   chain: string;
   chainName: string;
-  tokens: TokenResponse[];
-  totalValue: string;
+  tokens: PriceTokenInput[]; // Will now include valueUSD
+  valuation: {
+    totalValueUSD: number;
+    valueByChainUSD: Record<string, number>;
+  };
   error?: string;
 }
 
@@ -116,51 +120,54 @@ app.get('/tokens', async (req: Request, res: Response) => {
             };
           });
           
-          // Calculate total value (simplified - would need price data for real values)
-          const totalValue = tokenResponses.reduce((sum, token) => {
-            try {
-              const balance = parseFloat(ethers.formatUnits(token.balance, token.decimals));
-              return sum + (isNaN(balance) ? 0 : balance);
-            } catch (e) {
-              return sum;
-            }
-          }, 0);
-          
+          // Prepare tokens for price calculation
+          const tokensForPricing: PriceTokenInput[] = tokenResponses.map(tr => ({
+            ...tr,
+            chainKey: chainKey,
+          }));
+
+          // Calculate portfolio value using PriceService
+          const valuation: PortfolioValuation = await PriceService.calculatePortfolioValue(tokensForPricing);
+
           return {
             chain: chainKey,
             chainName: chain.name,
-            tokens: tokenResponses,
-            totalValue: totalValue.toString(),
-          } as ChainResponse;
+            tokens: valuation.tokensWithValue, // Use tokens with USD values from PriceService
+            valuation: {
+              totalValueUSD: valuation.totalValueUSD,
+              valueByChainUSD: valuation.valueByChainUSD,
+            }
+          };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           console.error(`Error processing chain ${chainKey}:`, errorMessage);
           return {
             chain: chainKey,
-            chainName: chainKey,
+            chainName: chains[chainKey as keyof typeof chains].name, // Corrected chain name access
             tokens: [],
-            totalValue: '0',
-            error: `Failed to fetch data: ${errorMessage}`,
-          } as ChainResponse;
+            valuation: { // Add empty valuation for error case
+              totalValueUSD: 0,
+              valueByChainUSD: {},
+            },
+            error: errorMessage,
+          };
         }
       })
     );
     
-    // Calculate total across all chains
-    const totalValue = results.reduce((sum, chainData) => {
-      return sum + parseFloat(chainData.totalValue || '0');
-    }, 0);
+    // Calculate overall valuation across all chains
+    const overallValuation = results.reduce((acc, chainData) => {
+      if (chainData.valuation) { // Ensure valuation object exists (it might not in case of an error for a chain)
+        acc.totalValueUSD += chainData.valuation.totalValueUSD;
+        acc.valueByChainUSD[chainData.chain] = chainData.valuation.totalValueUSD;
+      }
+      return acc;
+    }, { totalValueUSD: 0, valueByChainUSD: {} as Record<string, number> });
     
     res.json({
       walletAddress,
       chains: results,
-      valuation: {
-        total: totalValue.toString(),
-        byChain: results.reduce<Record<string, string>>((acc, chain) => {
-          acc[chain.chain] = chain.totalValue || '0';
-          return acc;
-        }, {}),
-      },
+      valuation: overallValuation
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

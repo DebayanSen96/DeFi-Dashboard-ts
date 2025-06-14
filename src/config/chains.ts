@@ -7,6 +7,7 @@ interface ChainConfig {
     name: string;
     symbol: string;
     decimals: number;
+    coingeckoId?: string; // Optional, as not all native currencies are on CoinGecko (e.g., testnets)
   };
 }
 
@@ -20,6 +21,7 @@ export const chains: Record<string, ChainConfig> = {
       name: 'Ethereum',
       symbol: 'ETH',
       decimals: 18,
+      coingeckoId: 'ethereum', // Price of ETH
     },
   },
   base: {
@@ -28,9 +30,10 @@ export const chains: Record<string, ChainConfig> = {
     rpcUrl: 'https://mainnet.base.org',  // Public Base RPC
     explorerUrl: 'https://basescan.org',
     nativeCurrency: {
-      name: 'Ethereum',
+      name: 'Ethereum', // Base uses ETH as its native currency
       symbol: 'ETH',
       decimals: 18,
+      coingeckoId: 'ethereum', // Price of ETH
     },
   },
   bittensor: {
@@ -42,6 +45,7 @@ export const chains: Record<string, ChainConfig> = {
       name: 'Tao',
       symbol: 'TAO',
       decimals: 18,
+      coingeckoId: 'bittensor',
     },
   },
   monad: {
@@ -53,6 +57,7 @@ export const chains: Record<string, ChainConfig> = {
       name: 'Monad',
       symbol: 'MON',
       decimals: 18,
+      coingeckoId: undefined, // Monad not on CoinGecko yet
     },
   },
 } as const;

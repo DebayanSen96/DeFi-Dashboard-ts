@@ -28,7 +28,6 @@ if (missingEnvVars.length > 0) {
 
 // Initialize CLI
 const program = new Command();
-program.help();
 program
   .name('defi-dashboard')
   .description('CLI for DeFi Portfolio Dashboard')
